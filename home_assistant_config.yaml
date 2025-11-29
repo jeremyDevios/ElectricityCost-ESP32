@@ -1,0 +1,109 @@
+# Configuration à ajouter dans Home Assistant
+# Fichier: configuration.yaml
+
+# Sensors pour conserver l'historique des 4 derniers jours
+# Méthode 1: Utiliser des input_number helpers (recommandé)
+# Aller dans Configuration > Helpers > Créer un helper > Nombre
+# Créer 3 helpers:
+#   - prix_jour_moins_3 (min: 0, max: 1000, step: 0.01)
+#   - prix_jour_moins_2 (min: 0, max: 1000, step: 0.01)
+#   - prix_jour_moins_1 (min: 0, max: 1000, step: 0.01)
+
+# Méthode 2: Via YAML (à ajouter dans configuration.yaml)
+input_number:
+  prix_jour_moins_3:
+    name: "Prix Jour -3"
+    min: 0
+    max: 1000
+    step: 0.01
+    mode: box
+    unit_of_measurement: "€"
+    
+  prix_jour_moins_2:
+    name: "Prix Jour -2"
+    min: 0
+    max: 1000
+    step: 0.01
+    mode: box
+    unit_of_measurement: "€"
+    
+  prix_jour_moins_1:
+    name: "Prix Jour -1"
+    min: 0
+    max: 1000
+    step: 0.01
+    mode: box
+    unit_of_measurement: "€"
+
+# Template sensors pour exposer les input_number comme sensors
+template:
+  - sensor:
+      - name: "Prix Jour Moins 3"
+        unique_id: prix_jour_moins_3_sensor
+        state: "{{ states('input_number.prix_jour_moins_3') }}"
+        unit_of_measurement: "€"
+        
+      - name: "Prix Jour Moins 2"
+        unique_id: prix_jour_moins_2_sensor
+        state: "{{ states('input_number.prix_jour_moins_2') }}"
+        unit_of_measurement: "€"
+        
+      - name: "Prix Jour Moins 1"
+        unique_id: prix_jour_moins_1_sensor
+        state: "{{ states('input_number.prix_jour_moins_1') }}"
+        unit_of_measurement: "€"
+
+# Automation pour décaler les valeurs chaque jour à minuit
+automation:
+  - id: shift_electricity_cost_history
+    alias: "Décaler historique coût électricité"
+    description: "Décale les valeurs des 3 derniers jours chaque jour à minuit"
+    trigger:
+      - platform: time
+        at: "00:00:01"
+    action:
+      # Décaler J-2 vers J-3
+      - service: input_number.set_value
+        target:
+          entity_id: input_number.prix_jour_moins_3
+        data:
+          value: "{{ states('input_number.prix_jour_moins_2') | float }}"
+      
+      # Décaler J-1 vers J-2
+      - service: input_number.set_value
+        target:
+          entity_id: input_number.prix_jour_moins_2
+        data:
+          value: "{{ states('input_number.prix_jour_moins_1') | float }}"
+      
+      # Décaler Jour actuel vers J-1
+      - service: input_number.set_value
+        target:
+          entity_id: input_number.prix_jour_moins_1
+        data:
+          value: "{{ states('sensor.prix_journalier_total') | float }}"
+    mode: single
+
+# Alternative: Si vous voulez initialiser manuellement les valeurs historiques
+# Créer un script pour remplir l'historique initial
+script:
+  init_electricity_history:
+    alias: "Initialiser historique électricité"
+    sequence:
+      - service: input_number.set_value
+        target:
+          entity_id: input_number.prix_jour_moins_3
+        data:
+          value: 1.20  # Remplacer par vos valeurs réelles
+      
+      - service: input_number.set_value
+        target:
+          entity_id: input_number.prix_jour_moins_2
+        data:
+          value: 2.34
+      
+      - service: input_number.set_value
+        target:
+          entity_id: input_number.prix_jour_moins_1
+        data:
+          value: 2.35

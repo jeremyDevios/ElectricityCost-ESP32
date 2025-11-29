@@ -53,3 +53,39 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+# ESPHome
+.esphome/
+*.bin
+
+# Secrets
+secrets.yaml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+venv/
+env/
+ENV/
+
+# Logs
+*.log
+
+# Build artifacts
+build/
+dist/
+*.egg-info/

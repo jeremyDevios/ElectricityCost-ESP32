@@ -1,0 +1,351 @@
+substitutions:
+  friendly_name: "ESP32-C6-LCD-1.47"
+  id: esp32_c6_lcd_147
+  area: Home Assistant
+  logger: "DEBUG"
+
+  vendor: "Waveshare"
+  model: "ESP32-C6-LCD-1-47in"
+  device_version: "v"
+
+  # SPI bus for LCD
+  miso_pin: GPIO5
+  mosi_pin: GPIO6
+  clk_pin: GPIO7
+  # LCD Pinout
+  lcd_cs_pin: GPIO14
+  lcd_dc_pin: GPIO15
+  lcd_reset_pin: GPIO21
+  lcd_backlight_pin: GPIO22
+  # LED RGB
+  rgb_led: GPIO8
+
+spi:
+  clk_pin: $clk_pin
+  miso_pin: $miso_pin
+  mosi_pin: $mosi_pin
+
+esp32:
+  board: esp32-c6-devkitc-1
+  variant: esp32c6
+  flash_size: 4MB
+  framework:
+    type: esp-idf
+    version: 5.3.1
+    platform_version: 6.9.0
+    sdkconfig_options:
+      CONFIG_ESPTOOLPY_FLASHSIZE_DETECT: y
+      CONFIG_ESPTOOLPY_FLASHSIZE_4MB: y
+      CONFIG_OPENTHREAD_ENABLED: n
+      CONFIG_USE_MINIMAL_MDNS: y
+      # Memory optimization
+      COMPILER_OPTIMIZATION_SIZE: y
+      COMPILER_OPTIMIZATION_LEVEL_RELEASE: y
+      CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_DISABLE: y
+      CONFIG_HEAP_POISONING_DISABLED: y
+
+esphome:
+  friendly_name: $friendly_name
+  name: $id
+  name_add_mac_suffix: false
+  area: $area
+  project:
+    name: "${vendor}.${model}"
+    version: "${device_version}"
+  platformio_options:
+    board_build.flash_mode: dio
+    platform_packages:
+      - platformio/toolchain-xtensa-esp-elf @ 14.2.0+20241119
+
+api:
+
+logger:
+  level: $logger
+
+ota:
+  - platform: esphome
+    id: ota_esphome
+
+safe_mode:
+  on_safe_mode:
+    - logger.log: "Safe Mode Activated"
+
+wifi:
+  id: wifi_id
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  fast_connect: off
+  reboot_timeout: 5min
+  power_save_mode: HIGH
+
+  on_connect:
+    then:
+      - logger.log: "WiFi connected"
+  on_disconnect:
+    then:
+      - logger.log: "WiFi disconnected"
+  enable_btm: true
+  enable_rrm: true
+
+network:
+  enable_ipv6: false
+
+esp32_improv:
+  authorizer: none
+
+improv_serial:
+
+time:
+  - platform: homeassistant
+    id: homeassistant_time
+
+# Sensors pour récupérer les données depuis Home Assistant
+sensor:
+  # Prix du jour actuel
+  - platform: homeassistant
+    id: prix_journalier
+    entity_id: sensor.prix_journalier_total
+    internal: false
+    
+  # Prix du mois actuel
+  - platform: homeassistant
+    id: prix_mois
+    entity_id: sensor.prix_mois_total
+    internal: false
+    
+  # Historique des 4 derniers jours (à créer dans HA avec des helpers ou templates)
+  - platform: homeassistant
+    id: jour_moins_3
+    entity_id: input_number.prix_jour_moins_3
+    internal: true
+    
+  - platform: homeassistant
+    id: jour_moins_2
+    entity_id: input_number.prix_jour_moins_2
+    internal: true
+    
+  - platform: homeassistant
+    id: jour_moins_1
+    entity_id: input_number.prix_jour_moins_1
+    internal: true
+    
+  - platform: homeassistant
+    id: jour_actuel
+    entity_id: sensor.prix_journalier_total
+    internal: true
+
+
+
+
+# Polices pour l'interface
+font:
+  - file: "common/Gotham-Medium.otf"
+    id: gotham_title
+    size: 20
+    
+  - file: "common/Gotham-Medium.otf"
+    id: gotham_large
+    size: 48
+    
+  - file: "common/Gotham-Medium.otf"
+    id: gotham_medium
+    size: 32
+    
+  - file: "common/Gotham-Medium.otf"
+    id: gotham_small
+    size: 16
+
+output:
+  - platform: ledc
+    pin: $lcd_backlight_pin
+    id: lcd_backlight
+    frequency: 1000 Hz
+
+number:
+  - platform: template
+    name: "Display Brightness"
+    id: display_brightness
+    optimistic: true
+    min_value: 0
+    max_value: 100
+    step: 1
+    initial_value: 100
+    restore_value: true
+    mode: slider
+    on_value:
+      then:
+        - output.set_level:
+            id: lcd_backlight
+            level: !lambda "return x / 100.0;"
+
+
+#light
+#onboard LED using pin GPIO3 as shown below
+light:
+  - platform: esp32_rmt_led_strip
+    id: rgb_onboard_light
+    name: "RGB Onboard Light"
+    pin: GPIO8
+    default_transition_length: 0s
+    chipset: WS2812
+    num_leds: 1
+    rgb_order: grb
+    effects:
+      - pulse:
+          name: "Slow Pulse"
+          transition_length: 1000ms
+          update_interval: 1000ms
+          min_brightness: 50%
+          max_brightness: 100%
+      - pulse:
+          name: "Fast Pulse"
+          transition_length: 100ms
+          update_interval: 100ms
+          min_brightness: 50%
+          max_brightness: 100%
+
+# Automation pour changer la couleur selon le prix
+interval:
+  - interval: 10s
+    then:
+      - lambda: |-
+          // Vérifier si le prix journalier est disponible
+          if (id(prix_journalier).has_state()) {
+            float prix = id(prix_journalier).state;
+            
+            // Log pour déboguer
+            ESP_LOGD("led", "Prix actuel: %.2f", prix);
+            
+            auto call = id(rgb_onboard_light).turn_on();
+            call.set_brightness(0.8); // 80% de luminosité
+            call.set_effect("Slow Pulse"); // Effet de clignotement doux
+            
+            if (prix >= 3.0) {
+              // Rouge si >= 3€
+              ESP_LOGD("led", "Couleur: ROUGE (>= 3.0)");
+              call.set_rgb(1.0, 0.0, 0.0);
+            } else if (prix >= 1.0) {
+              // Orange si >= 1€
+              ESP_LOGD("led", "Couleur: ORANGE (>= 1.0)");
+              call.set_rgb(1.0, 0.5, 0.0);
+            } else {
+              // Vert si < 1€
+              ESP_LOGD("led", "Couleur: VERT (< 1.0)");
+              call.set_rgb(0.0, 1.0, 0.0);
+            }
+            
+            call.perform();
+          } else {
+            ESP_LOGD("led", "Pas de valeur disponible");
+            // Si pas de valeur, allumer en blanc pour indiquer un problème
+            auto call = id(rgb_onboard_light).turn_on();
+            call.set_rgb(1.0, 1.0, 1.0);
+            call.set_brightness(0.3);
+            call.perform();
+          }
+
+# https://esphome.io/components/display/
+# TFT Display (ST7789)
+display:
+  - platform: st7789v
+    cs_pin: $lcd_cs_pin
+    dc_pin:
+      number: $lcd_dc_pin
+      ignore_strapping_warning: true
+    reset_pin: $lcd_reset_pin
+    model: Waveshare 1.47in 172X320
+    id: tft_ha
+    rotation: 0
+    update_interval: 5s
+    lambda: |-
+      // Fond noir
+      it.fill(Color::BLACK);
+      
+      // Titre "ELECTRIC COST" en haut
+      it.print(it.get_width() / 2, 30, id(gotham_title), Color::WHITE, TextAlign::TOP_CENTER, "ELECTRIC COST");
+      
+      // Prix du jour (grand)
+      if (id(prix_journalier).has_state()) {
+        char buf_jour[20];
+        snprintf(buf_jour, sizeof(buf_jour), "%.2f€", id(prix_journalier).state);
+        it.print(it.get_width() / 2, 70, id(gotham_large), Color::WHITE, TextAlign::TOP_CENTER, buf_jour);
+      } else {
+        it.print(it.get_width() / 2, 70, id(gotham_large), Color::WHITE, TextAlign::TOP_CENTER, "--,--€");
+      }
+      
+      // "This Month"
+      it.print(it.get_width() / 2, 140, id(gotham_small), Color(180, 180, 180), TextAlign::TOP_CENTER, "This Month");
+      
+      // Prix du mois
+      if (id(prix_mois).has_state()) {
+        char buf_mois[20];
+        snprintf(buf_mois, sizeof(buf_mois), "%.2f€", id(prix_mois).state);
+        it.print(it.get_width() / 2, 160, id(gotham_medium), Color::WHITE, TextAlign::TOP_CENTER, buf_mois);
+      } else {
+        it.print(it.get_width() / 2, 160, id(gotham_medium), Color::WHITE, TextAlign::TOP_CENTER, "--,--€");
+      }
+      
+      // === GRAPHIQUE ===
+      int graph_x = 30;        // Position X de départ
+      int graph_y = 250;       // Position Y de la ligne de base
+      int graph_width = 112;   // Largeur totale du graphique
+      int graph_height = 50;   // Hauteur maximale
+      
+      // Récupérer les 4 valeurs
+      float values[4] = {0, 0, 0, 0};
+      bool has_values[4] = {false, false, false, false};
+      
+      if (id(jour_moins_3).has_state()) {
+        values[0] = id(jour_moins_3).state;
+        has_values[0] = true;
+      }
+      if (id(jour_moins_2).has_state()) {
+        values[1] = id(jour_moins_2).state;
+        has_values[1] = true;
+      }
+      if (id(jour_moins_1).has_state()) {
+        values[2] = id(jour_moins_1).state;
+        has_values[2] = true;
+      }
+      if (id(jour_actuel).has_state()) {
+        values[3] = id(jour_actuel).state;
+        has_values[3] = true;
+      }
+      
+      // Trouver le max pour normaliser
+      float max_val = 0.1; // Valeur minimum pour éviter division par zéro
+      for (int i = 0; i < 4; i++) {
+        if (has_values[i] && values[i] > max_val) {
+          max_val = values[i];
+        }
+      }
+      
+      // Dessiner la courbe en doré/jaune
+      int spacing = graph_width / 3; // Espacement entre les points
+      int prev_x = -1, prev_y = -1;
+      
+      for (int i = 0; i < 4; i++) {
+        if (has_values[i]) {
+          int x = graph_x + (i * spacing);
+          int y = graph_y - (int)((values[i] / max_val) * graph_height);
+          
+          // Dessiner une ligne depuis le point précédent
+          if (prev_x >= 0) {
+            it.line(prev_x, prev_y, x, y, Color(200, 160, 0)); // Doré
+            it.line(prev_x, prev_y + 1, x, y + 1, Color(200, 160, 0)); // Épaissir la ligne
+          }
+          
+          prev_x = x;
+          prev_y = y;
+        }
+      }
+      
+      // Labels des valeurs en bas
+      char label_buf[10];
+      for (int i = 0; i < 4; i++) {
+        if (has_values[i]) {
+          int x = graph_x + (i * spacing);
+          snprintf(label_buf, sizeof(label_buf), "%.2f", values[i]);
+          it.print(x, graph_y + 10, id(gotham_small), Color(150, 150, 150), TextAlign::TOP_CENTER, label_buf);
+        }
+      }
